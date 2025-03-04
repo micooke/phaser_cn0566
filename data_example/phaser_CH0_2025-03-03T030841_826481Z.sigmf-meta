@@ -1,0 +1,38 @@
+{
+    "global": {
+        "core:author": "Phaser_CN0566",
+        "core:datatype": "cf32_le",
+        "core:description": "recording taken 2025-03-03T03:08:41.826481Z",
+        "core:num_channels": 1,
+        "core:sample_rate": 10000000,
+        "core:version": "1.2.3"
+    },
+    "captures": [
+        {
+            "core:datetime": "2025-03-03T03:08:41.828919Z",
+            "core:frequency": 1600000000.0,
+            "core:sample_start": 0
+        },
+        {
+            "core:datetime": "2025-03-03T03:08:41.833523Z",
+            "core:frequency": 1600000000.0,
+            "core:sample_start": 1
+        },
+        {
+            "core:datetime": "2025-03-03T03:08:41.837944Z",
+            "core:frequency": 1600000000.0,
+            "core:sample_start": 2
+        },
+        {
+            "core:datetime": "2025-03-03T03:08:41.843592Z",
+            "core:frequency": 1600000000.0,
+            "core:sample_start": 3
+        },
+        {
+            "core:datetime": "2025-03-03T03:08:41.847162Z",
+            "core:frequency": 1600000000.0,
+            "core:sample_start": 4
+        }
+    ],
+    "annotations": []
+}

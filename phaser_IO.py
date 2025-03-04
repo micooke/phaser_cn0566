@@ -76,6 +76,20 @@ class phaser_IO:
             os.remove(filename)
         else:
             print(f"[ERROR] file not found '{filename}'")
+    
+    @staticmethod
+    def rename(old_filename, new_filename):
+        if os.path.isfile(old_filename):
+            os.rename(old_filename, new_filename)
+        else:
+            print(f"[ERROR] file not found '{old_filename}'")
+    
+    @staticmethod
+    def replace(old_filename, new_filename):
+        if os.path.isfile(old_filename):
+            os.replace(old_filename, new_filename)
+        else:
+            print(f"[ERROR] file not found '{old_filename}'")
 
     @staticmethod
     def test():
@@ -127,16 +141,17 @@ class phaser_SigMF:
         self.fc_Hz = fc_Hz
 
         self.first_record = get_sigmf_iso8601_datetime_now()
-        self.base_filename = os.path.join(
-            self.base_dir, f"phaser_CH{self.channel_num}_{self.first_record}"
-        )
-        self.sigmf_data_fb = open(
-            self.base_filename + ".sigmf-data", "wb", buffering=buffer_size
-        )
+        
+        self.base_filename = (f"phaser_CH{self.channel_num}_{self.first_record}").replace(":","").replace(".","_")
+        self.base_filename = os.path.join(self.base_dir, self.base_filename)
+        
+        self.sigmf_data_fb = open(self.base_filename + ".sigmf-data", "wb", buffering=buffer_size)
         iq_data = np.array([0 + 0j], dtype=np.complex64)
         # write empty data for the first sample (due to error 'cannot mmap to empty file')
         self.sigmf_data_fb.write(iq_data)
         self.sigmf_data_fb.close()
+
+        # time.sleep(0.5)
 
         # @TODO(cookem): do this manually, otherwise the meta file has to be written when closing the data file
         # either that or just write sigmf-data as binary, and sigmf-meta
@@ -151,13 +166,17 @@ class phaser_SigMF:
             },
             skip_checksum=True,
         )
-        # self.sigmf_data_fb = open(self.base_filename + ".sigmf-data", "wb", buffering=2*2048)
-        self.sigmf_data_fb = open(self.base_filename + ".sigmf-data", "wb")
+        self.sigmf_data_fb = open(self.base_filename + "1.sigmf-data", "wb", buffering=buffer_size)
 
     def close(self):
         if self.sigmf_metadata is not None:
-            self.sigmf_data_fb.close()
             self.sigmf_metadata.tofile(self.base_filename + ".sigmf-meta")
+            self.sigmf_metadata = None
+            self.sigmf_data_fb.close()
+
+            # phaser_IO.delete(self.base_filename + ".sigmf-data")
+            # phaser_IO.rename(self.base_filename + "1.sigmf-data", self.base_filename + ".sigmf-data")
+            phaser_IO.replace(self.base_filename + "1.sigmf-data", self.base_filename + ".sigmf-data")
 
     def write(self, data):
         dt_now = get_sigmf_iso8601_datetime_now()
@@ -235,7 +254,7 @@ def profile_test():
     from line_profiler import LineProfiler
 
     lp = LineProfiler()
-    lp_wrapper = lp(_sigmf.test)
+    lp_wrapper = lp(phaser_IO.test)
     lp_wrapper()
     lp.print_stats()
 

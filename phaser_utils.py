@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 
-import os
-import time
 import pickle
 import numpy as np
 from scipy import signal
 
 import matplotlib.pyplot as plt
 
-
 nominal_hb100_freq_Hz: float = 10.525e9
 Phaser_LO_LOW: float = 2.5e9
 Phaser_LO_HIGH: float = 1.6e9  # 1.6e9
-
 
 # @author: ADI
 def spectrum_estimate(x, fs, ref=2**15):

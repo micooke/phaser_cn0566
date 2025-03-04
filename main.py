@@ -79,21 +79,21 @@ class phaser:
         time.sleep(0.5)  # recommended by Analog Devices
 
     def set_rx_buffer_size(self, rx_buffer_size: int = 1024):
-        self.plutoSDR_1.set_rx_buffer_size(rx_buffer_size)
+        self.plutoSDR_1.rx_buffer_size=rx_buffer_size
         if self.two_receivers:
-            self.plutoSDR_2.set_rx_buffer_size(rx_buffer_size)
+            self.plutoSDR_2.rx_buffer_size=rx_buffer_size
 
     def set_rx_bandwidth_Hz(self, rx_bandwidth_Hz: int = 10_000_000):
-        self.plutoSDR_1.set_rx_bandwidth_Hz(rx_bandwidth_Hz)
+        self.plutoSDR_1.rx_bandwidth_Hz=rx_bandwidth_Hz
         if self.two_receivers:
-            self.plutoSDR_2.set_rx_bandwidth_Hz(rx_bandwidth_Hz)
+            self.plutoSDR_2.rx_bandwidth_Hz=rx_bandwidth_Hz
 
     def set_sample_frequency_Hz(self, fs_Hz: int = 30_000_000):
         if fs_Hz != self.fs_Hz:
             self.fs_Hz = fs_Hz
-            self.plutoSDR_1.set_sample_frequency_Hz(fs_Hz)
+            self.plutoSDR_1.fs_Hz=fs_Hz
             if self.two_receivers:
-                self.plutoSDR_2.set_sample_frequency_Hz(fs_Hz)
+                self.plutoSDR_2.fs_Hz=fs_Hz
 
     def set_frequency_Hz(self, fc_Hz: float = nominal_hb100_freq_Hz):
         if fc_Hz != self.fc_Hz:
@@ -102,19 +102,19 @@ class phaser:
             new_lo = self.cn0566_1.set_frequency_Hz(self.fc_Hz)
             if new_lo is not None:
                 self.rx_lo_Hz = new_lo
-                self.plutoSDR_1.set_LO_Hz(self.rx_lo_Hz)
+                self.plutoSDR_1.fc_Hz=self.rx_lo_Hz
 
             if self.two_receivers:
                 new_lo = self.cn0566_2.set_frequency_Hz(self.fc_Hz)
                 if new_lo is not None:
                     self.rx_lo_Hz = new_lo
-                    self.plutoSDR_2.set_LO_Hz(self.rx_lo_Hz)
+                    self.plutoSDR_2.fc_Hz=self.rx_lo_Hz
 
     def plot(self, fc_Hz: float = nominal_hb100_freq_Hz):
-        self.plutoSDR_1.set_rx_gain(63)  # 60 = 1500/2000
+        self.plutoSDR_1.rx_gain=63  # 60 = 1500/2000
 
         self.set_frequency_Hz(fc_Hz)
-        data = self.plutoSDR_1.rx()
+        data = self.plutoSDR_1.read()
 
         # Take FFT
         PSD0 = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(data[0]))) ** 2)
@@ -158,7 +158,7 @@ class phaser:
         self.sigmf_1_CH0.open(0, fs_Hz, fc_Hz)
         self.sigmf_1_CH1.open(1, fs_Hz, fc_Hz)
         for n in range(num_buffers):
-            data = self.plutoSDR_1.rx()
+            data = self.plutoSDR_1.read()
             self.sigmf_1_CH0.write(data)
             self.sigmf_1_CH1.write(data)
         self.sigmf_1_CH0.close()
@@ -209,7 +209,7 @@ class phaser:
             # print(f"frequency: {freq/1e6:,.3f}MHz")
             self.set_frequency_Hz(freq)
 
-            data = self.plutoSDR_1.rx()  # 3.982 ms
+            data = self.plutoSDR_1.read()  # 3.982 ms
 
             data_sum = data[0] + data[1]
             #    max0 = np.max(abs(data[0]))
@@ -333,7 +333,7 @@ class phaser:
                     0.08
                 )  # 0.06s is the threshold for accurately measuring CW signals
 
-                data = self.plutoSDR_1.rx()  # 3.982 ms
+                data = self.plutoSDR_1.read()  # 3.982 ms
 
                 data_sum = data[0] + data[1]
                 #    max0 = np.max(abs(data[0]))
@@ -406,7 +406,7 @@ class phaser:
         # First, locate fundamental.
         cn0566.cn0566.set_all_gain(127)
         cn0566.cn0566.set_beam_phase_diff(0.0)
-        data = sdr.rx()  # read a buffer of data
+        data = sdr.read()  # read a buffer of data
         y_sum = (data[0] + data[1]) * win
         s_sum = np.fft.fftshift(np.absolute(np.fft.fft(y_sum)))
         return np.argmax(s_sum)
@@ -498,8 +498,8 @@ class phaser:
             for count in range(
                 0, cn0566.cn0566.Averages
             ):  # repeatsnip loop and average the results
-                data = sdr.rx()  # todo - remove once confirmed no flushing necessary
-                data = sdr.rx()  # read a buffer of data
+                data = sdr.read()  # todo - remove once confirmed no flushing necessary
+                data = sdr.read()  # read a buffer of data
                 y_sum = (data[0] + data[1]) * win
 
                 s_sum = np.fft.fftshift(np.absolute(np.fft.fft(y_sum)))
@@ -537,12 +537,12 @@ def test_buffer_size(my_phaser):
 
     for rx_buff_size in rx_buffer_range:
         # set the buffer size
-        my_phaser.plutoSDR_1.set_rx_buffer_size(rx_buff_size)
+        my_phaser.plutoSDR_1.rx_buffer_size=rx_buff_size
         # my_phaser.plutoSDR_1.plutoSDR.rx_buffer_size = int(rx_buff_size)
 
         # time the receive
         t0 = time.perf_counter_ns()
-        data = my_phaser.plutoSDR_1.rx()
+        data = my_phaser.plutoSDR_1.read()
         delta_us = (time.perf_counter_ns() - t0) / 1e3
         max_sample_rate_Msps = (
             np.shape(data)[1] / delta_us
@@ -574,10 +574,10 @@ if __name__ == "__main__":
     # my_phaser.channel_calibration(verbose=True)
     # 0.5192586079313221 dB @ 9.4GHz, rx_gain=6dB
     # my_phaser.cn0566_1.cn0566.ccal = [0.0, 0.5192586079313221]
-    # my_phaser.plutoSDR_1.set_channel_cal([1.2807293215820739, 0.0])
-    my_phaser.plutoSDR_1.set_channel_cal([2.0, 0.0])
+    # my_phaser.plutoSDR_1.channel_cal = [1.2807293215820739, 0.0]
+    my_phaser.plutoSDR_1.channel_cal = [2.0, 0.0]
 
-    my_phaser.plutoSDR_1.set_rx_gain(63)  # 60 = 1500/2000
+    my_phaser.plutoSDR_1.rx_gain=63  # 60 = 1500/2000
 
     test_buffer_size(my_phaser)
 
