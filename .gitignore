@@ -1,1 +1,5 @@
 __pycache__/
+*.ilk
+*.obj
+*.pdb
+*.exe
