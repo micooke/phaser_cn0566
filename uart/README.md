@@ -99,6 +99,13 @@ sudo usermod -a -G dialout $USER
 You'll need to log out and log back in for this to take effect
 
 ### 1 Mbps
+| Feature | Raspberry Pi 4B | Jetson Orin |
+| ------- | --------------- | ----------- |
+| Reliable | Up to 115,200 baud | Up to 921,600 baud |
+| Achievable | Up to 1-2 Mbps (with PL011 UART & config tweaks) | Up to 4 Mbps (often requires configuration beyond stty) |
+| Theoretical | Up to 4 Mbps (with specific init_uart_clock) | Up to 12.5 Mbps (requires device tree/kernel modifications) |
+
+Considerations	PL011 vs Mini UART, config.txt settings, CPU freq.	Multiple UARTs, device tree, kernel, hardware flow control, signal integrity
 Setting up a Raspberry Pi 4's PL011 UART and a Jetson Orin's UART for 1 Mbps (1,000,000 baud) involves specific configurations to ensure stability. While 1 Mbps is often achievable on both, it's crucial to understand the nuances.
 
 Raspberry Pi 4B: Enabling PL011 and Setting 1 Mbps
