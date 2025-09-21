@@ -1,0 +1,6 @@
+setuptools
+sigmf
+matplotlib
+numpy
+scipy
+python-bladerf

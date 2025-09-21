@@ -9,7 +9,7 @@ import atexit
 
 import numpy as np
 
-from codetiming import Timer
+# from codetiming import Timer
 
 import pickle
 import json
@@ -213,7 +213,7 @@ class phaser_SigMF:
         phaser_IO.delete(self.base_filename + ".sigmf-data")
         phaser_IO.delete(self.base_filename + ".sigmf-meta")
 
-    @Timer(name="write_test", text="{name}: {milliseconds:,.3f}ms")
+    # @Timer(name="write_test", text="{name}: {milliseconds:,.3f}ms")
     def write_test(self, BufferSize: int = 8_196):
         io.DEFAULT_BUFFER_SIZE = BufferSize
 
@@ -230,7 +230,7 @@ class phaser_SigMF:
         for n in range(31):
             self.write_test((n + 1) * 1024)
 
-    @Timer(name="threaded_test", text="{name}: {milliseconds:,.3f}ms")
+    # @Timer(name="threaded_test", text="{name}: {milliseconds:,.3f}ms")
     def threading_test(self):
         import threading
 

@@ -10,6 +10,9 @@ nominal_hb100_freq_Hz: float = 10.525e9
 Phaser_LO_LOW: float = 2.5e9
 Phaser_LO_HIGH: float = 1.6e9  # 1.6e9
 
+def print_vector(input, num_values:int = 5):
+    print("["+f"{input[:num_values]}"+"..."+f"{input[-num_values:]}"+"]")
+
 # @author: ADI
 def spectrum_estimate(x, fs, ref=2**15):
     eps = 10**-20

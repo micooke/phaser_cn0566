@@ -25,7 +25,6 @@ parser.add_argument(
 # 1 / kHz = ms
 # 1 / MHz = us
 
-
 # add additional functions to the standard BladeRF class to enable or disable oversampling
 class blade_RF(_bladerf.BladeRF):
     def enable_oversample(self):
@@ -82,15 +81,15 @@ def rx_config(
     ch2.frequency = center_freq
 
     # set bandwidth_Hz
-    ch1.bandwidth_Hz = bandwidth_Hz
-    ch2.bandwidth_Hz = bandwidth_Hz
+    ch1.bandwidth = bandwidth_Hz
+    ch2.bandwidth = bandwidth_Hz
 
     # output the selected sample rate and bandwidth
     print(
         f"Sample Rate (Msps): requested {sample_rate/1e6:,.2f} -> actual {ch1.sample_rate/1e6:,.2f}"
     )
     print(
-        f"   Bandwidth (MHz): requested {bandwidth_Hz/1e6:,.2f} -> actual {ch1.bandwidth_Hz/1e6:,.2f}"
+        f"   Bandwidth (MHz): requested {bandwidth_Hz/1e6:,.2f} -> actual {ch1.bandwidth/1e6:,.2f}"
     )
 
     ch1.gain = gain
@@ -133,27 +132,31 @@ def rx(bladerf1, num_samples, sample_format=_bladerf.Format.SC16_Q11):
 
     buf = bytearray(num_samples * total_bytes_per_sample)
 
+    print(f"[INFO] buf length {num_samples * total_bytes_per_sample}, read count {num_channels * num_samples}")
+
     num_samples_read = num_channels * num_samples
 
     # Read into buffer
     t0 = time.perf_counter_ns()
     bladerf1.sync_rx(buf, num_channels * num_samples)
+    t1 = time.perf_counter_ns()
 
     # data = np.frombuffer(buf[: len(buf) // 2], dtype=rx_dtype)
     data = np.frombuffer(buf, dtype=rx_dtype)
-    t1 = time.perf_counter_ns()
+    t2 = time.perf_counter_ns()
 
     num_bytes = (
         sys.getsizeof(buf) / 2
     )  # Not sure why /2, but when i write the data out, thats what it is
 
-    time_delta_us = (t1 - t0) / 1_000
+    read_time_delta_us = (t1 - t0) / 1_000
+    time_delta_us = (t2 - t0) / 1_000
 
     read_rate_Msps = num_samples_read / time_delta_us
     read_rate_MBph = (num_bytes / time_delta_us) * 60 * 60
 
     print(
-        f"number of IQ samples read = {num_samples_read:,}| {num_bytes/1024_000:,.2f}MB, time swath: {time_swath_us:,.3f}us, rx time: {time_delta_us:,.3f}us, rate: {read_rate_Msps:,.3f}Ms/s | {read_rate_MBph:,.3f} MB/hour"
+        f"number of IQ samples read = {num_samples_read:,}| {num_bytes/1024_000:,.2f}MB, time swath: {time_swath_us:,.0f}us, rx time: {read_time_delta_us:,.0f}us, rx & convert time: {time_delta_us:,.0f}us, rate: {read_rate_Msps:,.2f}Ms/s | {read_rate_MBph:,.2f} MB/hour"
     )
 
     t0 = time.perf_counter_ns()

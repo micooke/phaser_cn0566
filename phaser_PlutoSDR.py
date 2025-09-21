@@ -113,6 +113,14 @@ class phaser_PlutoSDR:
         return True
 
     @property
+    def channel(self):
+        return self._channel
+
+    @channel.setter
+    def channel(self, value: int = 0):
+        self._channel = value
+
+    @property
     def channel_cal(self):
         return self.ccal
     
@@ -214,18 +222,18 @@ class phaser_PlutoSDR:
         
         sdr.rx_buffer_size = rx_buffer_size
         data = [0]*rx_buffer_size
-        num_samples = 0
+        sample_count = 0
         t0 = time.perf_counter_ns()
         for n in range(num_reads):
             data = sdr.read()
-            num_samples += len(data)
+            sample_count += len(data)
         t1 = time.perf_counter_ns()
         sdr.close()
         print(data)
 
         time_delta_us = (t1-t0)/1_000
-        read_rate_Msps = num_samples / time_delta_us
-        print(f"read: num_samples = {num_samples:,}, time: {time_delta_us:,.3f}us, rate: {read_rate_Msps:,.3f}Msps")
+        read_rate_Msps = sample_count / time_delta_us
+        print(f"read: sample_count = {sample_count:,}, time: {time_delta_us:,.3f}us, rate: {read_rate_Msps:,.3f}Msps")
     
     @staticmethod
     def record(
