@@ -1,6 +1,6 @@
 setuptools
 sigmf
 matplotlib
-numpy
+numpy==1.26.3
 scipy
-python-bladerf
+#python-bladerf

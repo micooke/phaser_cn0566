@@ -84,8 +84,44 @@ def plot_spectrum(full_freq_range, full_amp_range, signal_threshold):
     plt.ylabel("Signal Strength [dBFS]")
     plt.legend()
     plt.show()
-    print("You may need to close this plot to continue...")
+    plt.clf()
+    plt.close("all")
 
+def plot_2channels(data, fs_Hz: int = 30_000_000, n_samples: int = 200):
+    # Take FFT
+    print("[INFO] FFT")
+    PSD0 = 10 * np.log10(np.finfo(np.complex64).eps + np.abs(np.fft.fftshift(np.fft.fft(data[0]))) ** 2)
+    PSD1 = 10 * np.log10(np.finfo(np.complex64).eps + np.abs(np.fft.fftshift(np.fft.fft(data[1]))) ** 2)
+    f = np.linspace(-fs_Hz / 2, fs_Hz / 2, len(PSD0))
+
+    print("[INFO] plot the spectral data")
+    plt.figure(1)
+    # Time plot helps us check that we see the emitter and that we're not saturated (ie gain isnt too high)
+    plt.subplot(2, 2, 1)
+    plt.plot(data[0].real[:n_samples], label="ch0 I")
+    plt.plot(data[0].imag[:n_samples], label="ch0 Q")
+    plt.legend(loc='upper right')
+    plt.xlabel("Data Point")
+    plt.ylabel("ADC output")
+    
+    plt.subplot(2, 2, 2)
+    plt.plot(data[1].real[:n_samples], label="ch1 I")
+    plt.plot(data[1].imag[:n_samples], label="ch1 Q")
+    plt.legend(loc='upper right')
+    plt.xlabel("Data Point")
+    plt.ylabel("ADC output")
+    
+    # PSDs show where the emitter is and verify both channels are working
+    plt.subplot(2, 1, 2)
+    plt.plot(f / 1e6, PSD0, label="ch0")
+    plt.plot(f / 1e6, PSD1, label="ch1")
+    plt.legend(loc='upper right')
+    plt.xlabel("Frequency [MHz]")
+    plt.ylabel("Signal Strength [dB]")
+    # plt.tight_layout()
+    plt.show()
+    plt.clf()
+    plt.close("all")
 
 def save_pkl(data, filename="hb100_freq_val.pkl"):
     with open(filename, "wb") as fb:

@@ -9,7 +9,7 @@ import atexit
 import numpy as np
 from bladerf import _bladerf
 
-from phaser_utils import Phaser_LO_HIGH, print_vector
+from phaser_utils import Phaser_LO_HIGH, print_vector, plot_2channels
 from phaser_IO import phaser_SigMF, phaser_IO
 
 
@@ -22,7 +22,18 @@ class BladeRF(_bladerf.BladeRF):
     def disable_oversample(self):
         ret = _bladerf.libbladeRF.bladerf_enable_feature(self.dev[0], 0, True)
         _bladerf._check_error(ret)
-
+        
+    #def calibrate_dc(self): # bladeRF 1.0
+    #    # BladeRF_Cal_Module = {"BLADERF_DC_CAL_INVALID": -1,
+    #    #                       "BLADERF_DC_CAL_LPF_TUNING": 0,
+    #    #                       "BLADERF_DC_CAL_TX_LPF": 1,
+    #    #                       "BLADERF_DC_CAL_RX_LPF": 2,
+    #    #                       "BLADERF_DC_CAL_RXVGA2": 3}
+    #    #
+    #    # Note: lms cal runs through 0,1,2,3 in order for calibration
+    #    ret = _bladerf.libbladeRF.bladerf_calibrate_dc(self.dev[0], 2)
+    #    _bladerf._check_error(ret)
+ 
 # phaser class
 # @author: Mark Cooke
 class phaser_BladeRF:
@@ -53,6 +64,8 @@ class phaser_BladeRF:
 
         self.buffer = bytearray(0)
         self._rx_buffer_size = 32_768
+        
+        self._dc_offset = np.complex64([0.0+1j*0.0, 0.0+1j*0.0])
 
         self.setup(
             fs_Hz, fc_Hz, self.default_gain_dB, self._rx_buffer_size, DeviceString
@@ -121,8 +134,6 @@ class phaser_BladeRF:
         self._channel[0].enable = True
         self._channel[1].enable = True
 
-        print(dir(self._channel[0]))
-
         # Handy filter for fairly wideband measurements
         # self.sdr.filter = os.path.join(self.base_dir, "LTE20_MHz.ftr")
 
@@ -134,6 +145,18 @@ class phaser_BladeRF:
         #     ch.enable = False
         
         return True
+
+    def calibrate_dc(self, fc_Hz = None, rx_gain_dB = None):
+        if fc_Hz is not None:
+            self.fc_Hz = fc_Hz
+        if rx_gain_dB is not None:
+            self.rx_gain = rx_gain_dB
+        
+        data = self.read()
+        
+        self._dc_offset = np.complex64([np.mean(data[0]), np.mean(data[1])])
+        print(f"[INFO] DC offset = {self._dc_offset}")        
+        
 
     # ['SC16_Q11', 'SC16_Q11_META', 'SC8_Q7', 'SC8_Q7_META']
     @property
@@ -215,7 +238,7 @@ class phaser_BladeRF:
 
     @rx_buffer_size.setter
     def rx_buffer_size(self, rx_buffer_size: int = 32_768):
-        print("[INFO] rx_buffer_size")
+        # print("[INFO] rx_buffer_size")
         if (rx_buffer_size % 1_024) != 0:
             _rx_buffer_size = ((rx_buffer_size // 1_024) + 1) * 1_024
             print(
@@ -251,7 +274,7 @@ class phaser_BladeRF:
         self._channel[1].frequency = fc_Hz
 
     def read_buffer(self, num_samples:int = int(2**21)):
-        print("[INFO] read_buffer")
+        # print("[INFO] read_buffer")
         total_samples_read = self.num_channels * num_samples
         total_buffer_size = num_samples * self.total_bytes_per_sample
 
@@ -280,6 +303,19 @@ class phaser_BladeRF:
         return self.buffer
     
     def read(self, num_samples:int = int(2**21)):
+        self.read_buffer(num_samples)
+        data = np.frombuffer(self.buffer, dtype=self.rx_dtype)
+
+        # 2048 = 2^(12-1) bits; where ADC bit number is 12b
+        # int range = [-2048:2047]
+        # convert int to complex64
+        complex_data=(data/2047).astype(np.float32).view(np.complex64)
+        # deinterleave
+        signals = [complex_data[0::2] + self._dc_offset[0], complex_data[1::2] + self._dc_offset[1]]
+
+        return signals
+    
+    def timed_read(self, num_samples:int = int(2**21)):
         print("[INFO] read")
         total_samples_read = self.num_channels * num_samples
         
@@ -298,8 +334,14 @@ class phaser_BladeRF:
         
         t2 = time.perf_counter_ns()
         # 2048 = 2^(12-1) bits; where ADC bit number is 12b
-        signals = [(data[0:-3:4] / 2048) + 1j*(data[1:-2:4] / 2048), 
-                   (data[2:-1:4] / 2048) + 1j*(data[3::4] / 2048)]
+        # int range = [-2048:2047]
+        # convert int to complex64: 532.02us for 1024 samples
+        complex_data=(data/2047).astype(np.float32).view(np.complex64)
+        # deinterleave
+        signals = [complex_data[0::2] + self._dc_offset[0], complex_data[1::2] + self._dc_offset[1]]
+        ## convert int to complex128: 533.98us for 1024 samples
+        #signals = [(data[0:-3:4] / 2047) + 1j*(data[1:-2:4] / 2047), 
+        #           (data[2:-1:4] / 2047) + 1j*(data[3::4] / 2047)]
         t3 = time.perf_counter_ns()
 
         time_int2complex_us = (t3 - t2) / 1_000
@@ -320,18 +362,19 @@ class phaser_BladeRF:
         print(f"[INFO] buffer_len: {len(self.buffer):,}, num_bytes: {num_bytes:,}, num_samples (per channel): {num_samples_read:,}")
 
         read_rate_MBph = (num_bytes / time_readbytes_us) * 60 * 60
+        mins_to_record_1TB_hr = 60*(1_000_000)/read_rate_MBph
 
         print("[INFO]")
-        print(f"* read_bytes (us): {time_readbytes_us:,.2f}")
+        print(f"* read bytes (us): {time_readbytes_us:,.2f}")
         print(f"* convert:bytes2int (us): {time_byte2int_us:,.2f}")
         print(f"* convert:int2complex (us): {time_int2complex_us:,.2f}")
-        print(f"* read_bytes (MB/s): {read_buffer_rate_MBps:,.2f}")
-        print(f"* convert_rate (MS/s): {convert_rate_Msps:,.2f}")
-        print(f"* total_read_rate (MS/s): {total_read_rate_Msps:,.2f}")
-        print(f"* data_rate (MB/hr): {read_rate_MBph:,.2f}")
-        print(f"* time/TB (hr): {read_rate_MBph:,.2f}")
+        print(f"* read bytes (MB/s): {read_buffer_rate_MBps:,.2f}")
+        print(f"* convert rate (MS/s): {convert_rate_Msps:,.2f}")
+        print(f"* total read rate (MS/s): {total_read_rate_Msps:,.2f}")
+        print(f"* data rate (MB/hr): {read_rate_MBph:,.2f}")
+        print(f"* time to record 1TB (min): {mins_to_record_1TB_hr:,.2f}")
 
-        return data
+        return signals
 
     @staticmethod
     def list():
@@ -473,42 +516,64 @@ class phaser_BladeRF:
             return
 
         sdr.rx_gain = 63  # [-15 to 60dB] 60 = 1500/2000
-        data = sdr.read()
+        sdr.sdr.calibrate_rx_dc(offset=True)
+        data = sdr.read(1024)
         print("[INFO] read complete")
+        fs_Hz = sdr.fs_Hz
         sdr.close()
+        #print(type(data[0][0]))
 
         # Take FFT
-        PSD0 = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(data))) ** 2)
-        f = np.linspace(-sdr.fs_Hz / 2, sdr.fs_Hz / 2, len(data))
-        # PSD0 = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(data[0]))) ** 2)
-        # PSD1 = 10 * np.log10(np.abs(np.fft.fftshift(np.fft.fft(data[1]))) ** 2)
-        # f = np.linspace(-sdr.fs_Hz / 2, sdr.fs_Hz / 2, len(data[0]))
+        print("[INFO] FFT")
+        PSD0 = 10 * np.log10(np.finfo(np.complex64).eps + np.abs(np.fft.fftshift(np.fft.fft(data[0]))) ** 2)
+        PSD1 = 10 * np.log10(np.finfo(np.complex64).eps + np.abs(np.fft.fftshift(np.fft.fft(data[1]))) ** 2)
+        f = np.linspace(-fs_Hz / 2, fs_Hz / 2, len(PSD0))
 
+        print("[INFO] plot the spectral data")
         # Time plot helps us check that we see the emitter and that we're not saturated (ie gain isnt too high)
         plt.subplot(2, 1, 1)
-        plt.plot(data.real, label="ch0")  # Only plot real part
-        # plt.plot(data[0].real, label="ch0")  # Only plot real part
-        # plt.plot(data[1].real, label="ch1")
-        plt.legend()
+        plt.plot(data[0].real, label="ch0")  # Only plot real part
+        plt.plot(data[1].real, label="ch1")
+        plt.legend(loc='upper right')
         plt.xlabel("Data Point")
         plt.ylabel("ADC output")
 
         # PSDs show where the emitter is and verify both channels are working
         plt.subplot(2, 1, 2)
         plt.plot(f / 1e6, PSD0, label="ch0")
-        # plt.plot(f / 1e6, PSD1, label="ch1")
-        plt.legend()
+        plt.plot(f / 1e6, PSD1, label="ch1")
+        plt.legend(loc='upper right')
         plt.xlabel("Frequency [MHz]")
         plt.ylabel("Signal Strength [dB]")
+        
         plt.tight_layout()
         plt.show()
-
+        plt.clf()
+        plt.close()
+        
+    @staticmethod
+    def test_dc_calibration(fc_Hz: float = Phaser_LO_HIGH, rx_gain_dB: int = 0, DeviceString: str = "6b5d"):
+        _sdr = phaser_BladeRF(fc_Hz = fc_Hz, DeviceString = DeviceString)
+        _sdr.rx_gain = rx_gain_dB
+        
+        # there looks to be an initial spike in the data when the frequency is changed (uncleared buffer?)
+        # the easier fix is to perform an initial read an discard it
+        A = _sdr.read()
+        A = _sdr.read()
+        plot_2channels(A)
+        _sdr.calibrate_dc()
+        A = _sdr.read()
+        #plot_2channels(A)
+        _sdr.calibrate_dc()
+        _sdr.close()
 
 if __name__ == "__main__":
     phaser_BladeRF.list()
     num_reads = 5
     DeviceString = "6b5d"
+    
+    phaser_BladeRF.test_dc_calibration(DeviceString=DeviceString)
     # phaser_BladeRF.read_test()
-    phaser_BladeRF.plot(1.6e9, DeviceString=DeviceString)
+    # phaser_BladeRF.plot(Phaser_LO_HIGH, DeviceString=DeviceString)
     # phaser_BladeRF.test(num_reads=num_reads, DeviceString=DeviceString)
     # phaser_BladeRF.record(num_reads=num_reads, DeviceString=DeviceString)

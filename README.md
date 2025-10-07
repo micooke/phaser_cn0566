@@ -1,9 +1,15 @@
 # bladeRF
+
+# method1
+# note: this doesn't work with the CN0566 rpi4 as it uses an older Ubuntu version
+
 sudo add-apt-repository ppa:nuand/bladerf
 sudo apt-get update
 sudo apt-get install bladerf
 
 sudo apt-get install libbladerf-dev
+
+# method2
 
 sudo apt update
 sudo apt install cmake python3-pip libusb-1.0-0
@@ -16,7 +22,12 @@ cmake ..
 make -j8
 sudo make install
 sudo ldconfig
+pushd libraries/libbladeRF_bindings/python
+sudo python3 setup.py install # install the python bindings
 popd
+popd
+
+# Virtual Environments
 
 python3 -m venv phaser
 source phaser/bin/activate
@@ -46,13 +57,30 @@ bladeRF-cli --flash-firmware /usr/share/Nuand/bladeRF/bladeRF_fw.img
 
 bladerf-tool flash_fpga /usr/share/Nuand/bladeRF/hostedxA9.rbf
 
+
+## Firmware and FPGA versions
+# version check
+#bladeRF-cli -e info -e version
+# To disable auto-loading
+#bladeRF-cli -L hostedxA9-latest.rbf
+# Note: this may be outdated, as these commands dont show the correct Firmware and FPGA after flashing
+
+# Firmware 2.4.0-git-a3d5c55f
+# FPGA 0.14.0 (configured from SPI flash)
+# The latest source recommends:
+# Firmware >= 2.5.0
+# FPGA >= 0.16.0
+
 #cd ~/Downloads
-#wget https://www.nuand.com/fx3/bladeRF_fw_latest.img
+#wget -nc https://www.nuand.com/fx3/bladeRF_fw_latest.img
+#wget -nc https://www.nuand.com/fx3/bladeRF_fw_v2.6.0.img ## most recent
 #bladerf-tool flash_fw bladeRF_fw_latest.img
 
 ## for xA9
-#wget https://www.nuand.com/fpga/hostedxA9-latest.rbf
+#wget -nc https://www.nuand.com/fpga/hostedxA9-latest.rbf
+#wget -nc https://www.nuand.com/fpga/v0.16.0/hostedxA9.rbf ## most recent
 #bladerf-tool flash_fpga hostedxA9-latest.rbf
+
 
 # BladeRF Notes
 If you forget to enable the Rx channel, requesting a read will result in a timeout
