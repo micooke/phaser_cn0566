@@ -23,8 +23,11 @@ class phaser_CN0566:
         self,
         fc_Hz: float = nominal_hb100_freq_Hz,
         rx_lo_Hz: float = Phaser_LO_HIGH,
-        CN0566_ip: str = "ip:phaser.local",
+        DeviceString: str = "ip:localhost",
     ):
+        self.__name__ = "CN0566"
+        self.DeviceString = DeviceString
+        
         #                    temp   1.8V 3.0    3.3   4.5   15?   USB   curr. Vtune
         self.monitor_hi_limits = [60.0, 1.85, 3.15, 3.45, 4.75, 16.0, 5.25, 1.6, 14.0]
         self.monitor_lo_limts = [20.0, 1.75, 2.850, 3.15, 4.25, 13.0, 4.75, 1.2, 1.0]
@@ -46,7 +49,7 @@ class phaser_CN0566:
 
         self.rx_lo_offset = 0  # 100e3
 
-        if self.setup(rx_lo_Hz, CN0566_ip):
+        if self.setup(rx_lo_Hz, DeviceString):
             self.set_frequency_Hz(fc_Hz)
 
         atexit.register(self.close)
@@ -55,21 +58,29 @@ class phaser_CN0566:
         pass
 
     def setup(
-        self, rx_lo_Hz: float = Phaser_LO_HIGH, CN0566_ip: str = "ip:phaser.local"
+        self, rx_lo_Hz: float = Phaser_LO_HIGH, DeviceString: str = "ip:localhost"
     ):
-        # First try to connect to a locally connected CN0566. On success, connect,
-        # on failure, connect to remote CN0566
+        self.DeviceString = DeviceString
+        if DeviceString != "ip:phaser.local:50901":
+            alt_DeviceString = "ip:phaser.local:50901"
+        else:
+            alt_DeviceString = "ip:localhost"
+       
+        # First try to connect to a locally connected device. On success, connect,
+        # on failure, connect to remote device
         try:
-            print(f"Attempting to connect to CN0566 via {CN0566_ip}...")
-            self.cn0566 = CN0566(uri=f"ip:{CN0566_ip}")
-            print(f"CN0566 connected on '{CN0566_ip}'")
-        except:
+            print(f"Connecting to '{self.__name__}' via '{self.DeviceString}'...", end=" ")
+            self.cn0566 = CN0566(uri=self.DeviceString)
+            print("Connected")
+        except Exception:  # pyadi-iio raises this error
             try:
-                print("Failed. Connecting via ip:localhost...")
-                self.cn0566 = CN0566(uri="ip:localhost")
-                print("CN0566 connected on 'ip:localhost'")
-            except:
-                print(f"[ERROR] cannot connect to CN0566 on {CN0566_ip}")
+                self.DeviceString = alt_DeviceString
+                print(f"Failed. Connecting via '{self.DeviceString}'...", end=" ")
+                self.cn0566 = CN0566(uri=self.DeviceString)
+                print("Connected")
+            except Exception:
+                print("Failed")
+                self.sdr = None
                 return False
 
         time.sleep(0.5)  # needed?
@@ -143,15 +154,16 @@ class phaser_CN0566:
 
         if freq_changed:
             ## depending on the ADI example, either the lo or the frequency is set.
-            ## Until further investigation is undertaken, its a roll of the dice on which is required
+            ## @cookem CONFIRMED Aug2025: Both methods provide the same result
 
             # Change the ADF4159 PLL
-            self.cn0566.lo = int(self.fc_Hz + self.rx_lo_Hz + self.rx_lo_offset)
+            # self.cn0566.lo = int(self.fc_Hz + self.rx_lo_Hz + self.rx_lo_offset)
 
             # Change the HMC735 VCO feeback to the ADF4159
-            # self.cn0566.frequency = (
-            #     int(self.fc_Hz + self.rx_lo_Hz + self.rx_lo_offset) // 4
-            # )
+            self.cn0566.frequency = (
+                int(self.fc_Hz + self.rx_lo_Hz + self.rx_lo_offset) // 4
+            )
+            # print("[set_freq] OUT lo: %f, freq: %f"%(self.cn0566.lo, self.cn0566.frequency))
 
         return new_lo
 
@@ -180,23 +192,21 @@ class phaser_CN0566:
 
     # @author: Mark Cooke
     # TODO: log this to a file, periodically call it
-    def status(self):
-        print("Reading voltage monitor...")
+    def status(self, verbose:bool = False):
+        if verbose:
+            print("Reading status...")
         monitor_vals = self.cn0566.read_monitor()
 
-        for i in range(0, len(monitor_vals)):
-            if not (
-                self.monitor_lo_limts[i] <= monitor_vals[i] <= self.monitor_hi_limits[i]
-            ):
-                print("Fails ", monitor_ch_names[i], ": ", monitor_vals[i])
-                failures.append(
-                    "Monitor fails "
-                    + self.monitor_ch_names[i]
-                    + ": "
-                    + str(monitor_vals[i])
-                )
-            else:
-                print("Passes ", self.monitor_ch_names[i], monitor_vals[i])
+        if verbose:
+            for i in range(0, len(monitor_vals)):
+                if not (
+                    self.monitor_lo_limts[i] <= monitor_vals[i] <= self.monitor_hi_limits[i]
+                ):
+                    print("Fails ", self.monitor_ch_names[i], ": ", monitor_vals[i])
+                else:
+                    print("Passes ", self.monitor_ch_names[i], monitor_vals[i])
+
+        return monitor_vals
 
     # @author: Mark Cooke
     # beamsteering - set the angle of the mainlobe
@@ -210,3 +220,4 @@ if __name__ == "__main__":
     cn0566.set_taper("hanning")
     # cn0566.find_emitter()
     cn0566.set_frequency_Hz()
+    cn0566.status()

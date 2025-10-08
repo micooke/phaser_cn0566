@@ -238,7 +238,7 @@ class phaser_BladeRF:
 
     @rx_buffer_size.setter
     def rx_buffer_size(self, rx_buffer_size: int = 32_768):
-        # print("[INFO] rx_buffer_size")
+        print("[INFO] rx_buffer_size")
         if (rx_buffer_size % 1_024) != 0:
             _rx_buffer_size = ((rx_buffer_size // 1_024) + 1) * 1_024
             print(
@@ -302,7 +302,7 @@ class phaser_BladeRF:
 
         return self.buffer
     
-    def read(self, num_samples:int = int(2**21)):
+    def read(self, num_samples:int = int(2048)):#int(2**21)):
         self.read_buffer(num_samples)
         data = np.frombuffer(self.buffer, dtype=self.rx_dtype)
 
@@ -381,7 +381,7 @@ class phaser_BladeRF:
         print("[ERROR] 'list()' function is not implemented")
 
     @staticmethod
-    def read_test():
+    def read_test(rx_buffer_size: int = 32_768):
         DeviceID = "6b5d".encode("utf-8")
         fc_Hz: float = Phaser_LO_HIGH
         fs_Hz: int = 10_000_000
@@ -423,7 +423,7 @@ class phaser_BladeRF:
             layout=_bladerf.ChannelLayout.RX_X2,
             fmt=_bladerf.Format.SC16_Q11,
             num_buffers=32,
-            buffer_size=32_768,  # must be a multiple of 1_024
+            buffer_size=rx_buffer_size,  # must be a multiple of 1_024
             num_transfers=16,  # 4, 8, 16
             stream_timeout=1_000,
         )

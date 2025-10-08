@@ -66,13 +66,13 @@ class phaser:
         # self.SDR_1 = phaser_PlutoSDR(self.fs_Hz, self.rx_lo_Hz, PlutoSDR_ip="192.168.2.11")
         self.SDR_1 = phaser_BladeRF(self.fs_Hz, self.rx_lo_Hz, DeviceString="6b5d") # Note: change
         self.cn0566_1 = phaser_CN0566(
-            self.fc_Hz, self.rx_lo_Hz, CN0566_ip="ip:phaser.local"
+            self.fc_Hz, self.rx_lo_Hz, DeviceString="ip:phaser.local"
         )
         if self.two_receivers:
             # self.SDR_2 = phaser_PlutoSDR(self.fs_Hz, self.rx_lo_Hz, PlutoSDR_ip="192.168.2.12")
             self.SDR_2 = phaser_BladeRF(self.fs_Hz, self.rx_lo_Hz, DeviceString="6b5d") # Note: change
             self.cn0566_2 = phaser_CN0566(
-                self.fc_Hz, self.rx_lo_Hz, CN0566_ip="ip:phaser.local"
+                self.fc_Hz, self.rx_lo_Hz, DeviceString="ip:phaser.local"
             )
         time.sleep(0.5)  # recommended by Analog Devices
 
@@ -167,6 +167,9 @@ class phaser:
         # phaser_IO.delete(self.base_filename + ".sigmf-data")
         # phaser_IO.delete(self.base_filename + ".sigmf-meta")
 
+    def find_peak(self, f_start: float = 8.0e9, f_stop: float = 10.6e9):
+        return self.sweep(f_start, f_stop, interactive = False)
+
     # @author: Mark Cooke
     def sweep(
         self, f_start: float = 8.0e9, f_stop: float = 10.6e9, interactive: bool = False
@@ -176,13 +179,16 @@ class phaser:
         # Filter is 20MHz LTE, so you get a bit less than 20MHz of usable
         # bandwidth. Set step size to something less than 20MHz to ensure
         # complete coverage.
+        
+        peak_freq = None
 
         N_FFT = 1024  # from the FFT in spec_est()
 
         # sampling bandwidth is 30MHz wide
         freqs = np.linspace(-self.fs_Hz / 2, self.fs_Hz / 2, N_FFT)
 
-        f_diff = np.diff(freqs)[1]
+        # set the tuned frequency list to be a multiple of the FFT bin size
+        f_diff = np.diff(freqs)[1] # FFT bin size
         tune_inc = int(10_000_000 // f_diff)
         f_step = float(tune_inc) * f_diff  # make f_step a multiple of the fft steps
 
@@ -190,13 +196,14 @@ class phaser:
         w0_freq = freqs[freqs >= -f_step][0]
         w1_freq = freqs[freqs >= f_step][0]
         window_inc = np.argmin(abs(freqs - w0_freq))
-        window_length = int((w1_freq - w0_freq) // f_diff)
+        window_length = int((w1_freq - w0_freq) // f_diff) + 1
         half_window_length = window_length // 2
 
         # print(f"{f_diff/1e3:,.3f}kHz, {f_step/1e6:,.3f}MHz, {tune_inc}, {window_inc}, {window_length}")
         tune_freq_range = np.arange(f_start, f_stop, f_step)  # 10MHz steps
         # tune_freq_range = np.arange(f_start, f_stop, 2 * f_step)  # 20MHz steps
 
+        # add the sampling window to either side of the tuneable range as f_start and f_stop define the centre frequency
         full_freq_range = np.arange(
             tune_freq_range[0] + w0_freq, tune_freq_range[-1] + w1_freq, f_diff
         )
@@ -204,30 +211,40 @@ class phaser:
 
         idx = 0
         for freq in tune_freq_range:  # range(int(f_start), int(f_stop), int(f_step)):
-            # print(f"frequency: {freq/1e6:,.3f}MHz")
-            self.set_frequency_Hz(freq)
-
-            data = self.SDR_1.read()  # 3.982 ms
-
+            #print(f"frequency: {freq/1e6:,.3f}MHz")
+            #t0 = time.perf_counter_ns()
+            self.set_frequency_Hz(freq) # 1,505 us
+            #delta_us = (time.perf_counter_ns() - t0) / 1e3
+            #print(f'[INFO] set freq {delta_us}us')
+            
+            #t0 = time.perf_counter_ns()
+            data = self.SDR_1.read(1024)  # 1,493 us
+            #delta_us = (time.perf_counter_ns() - t0) / 1e3
+            #print(f'[INFO] read {delta_us}us')
+            
+            #t0 = time.perf_counter_ns()
             data_sum = data[0] + data[1]
             #    max0 = np.max(abs(data[0]))
             #    max1 = np.max(abs(data[1]))
             #    print("max signals: ", max0, max1)
-            ampl, freqs = spectrum_estimate(
-                data_sum, self.fs_Hz, ref=2 ^ 12
-            )  # 2.375 ms
-
+            ampl, _ = spectrum_estimate( data_sum, self.fs_Hz, ref=2 ^ 12 )  # 4,289 us
+            #delta_us = (time.perf_counter_ns() - t0) / 1e3
+            #print(f'[INFO] spectrum estimate {delta_us}us')
+            
+            #t0 = time.perf_counter_ns()
             # only look at the inner 20MHz
-            window = ampl[window_inc : window_inc + window_length + 1]
-            swath = full_amp_range[idx : idx + window_length + 1]
+            window = ampl[window_inc : window_inc + window_length]
+            swath = full_amp_range[idx : idx + window_length]
 
             dwell = np.maximum(window, swath)
 
-            full_amp_range[idx : idx + window_length + 1] = dwell
-
+            full_amp_range[idx : idx + window_length] = dwell
+            #delta_us = (time.perf_counter_ns() - t0) / 1e3
+            #print(f'[INFO] allocate data {delta_us}us') # 200us
+                        
             idx += tune_inc
 
-            # print(f"{freq/1e9:,.3f}GHz:[{full_freq_range[idx]/1e9:,.3f}GHz|{full_freq_range[idx+half_window_length]/1e9:,.3f}GHz|{full_freq_range[idx+window_length]/1e9:,.3f}GHz]")
+            #print(f"{freq/1e9:,.3f}GHz:[{full_freq_range[idx]/1e9:,.3f}GHz|{full_freq_range[idx+half_window_length]/1e9:,.3f}GHz|{full_freq_range[idx+window_length]/1e9:,.3f}GHz]")
 
             time.sleep(0.001)  # 100.164 ms
 
@@ -268,13 +285,15 @@ class phaser:
             )
             if prompt.upper() == "Y":
                 plot_spectrum(full_freq_range, full_amp_range, signal_threshold)
+        
+        return peak_freq
 
     def on_mpl_exit(self, event):
         if event.key == "q":
             self.stop_plotting = True
 
     def freq_tracker(
-        self, fc_MHz: int = 10_000, BW_MHz: int = 300, update_time_s: float = 1.0
+        self, fc_MHz: int = 10_000, BW_MHz: int = 300, update_time_s: float = 1.0, samples_per_bin: int = 1
     ):
         N_FFT = 1024  # from the FFT in spec_est()
         freqs_Hz = np.linspace(-self.fs_Hz / 2, self.fs_Hz / 2, N_FFT)
@@ -287,7 +306,7 @@ class phaser:
         w0_freq = freqs_Hz[freqs_Hz >= -f_step][0]
         w1_freq = freqs_Hz[freqs_Hz >= f_step][0]
         window_inc = np.argmin(abs(freqs_Hz - w0_freq))
-        window_length = int((w1_freq - w0_freq) // f_diff)
+        window_length = int((w1_freq - w0_freq) // f_diff) + 1
         half_window_length = window_length // 2
 
         ## setup plot
@@ -296,10 +315,14 @@ class phaser:
         fig.canvas.mpl_connect("key_press_event", self.on_mpl_exit)
 
         freq_centre_MHz = fc_MHz
+        
+        sdr = self.SDR_1
 
         freqs = []
         amps = []
         snrs = []
+        
+        data_sum = np.zeros(sdr.rx_buffer_size, dtype=complex)
 
         print(f"centre frequency: {freq_centre_MHz:,.0f}MHz")
         while True:
@@ -319,12 +342,16 @@ class phaser:
                 (f_diff / 1e6),
             )
             full_amp_range = np.array([-np.Inf] * len(full_freq_range_MHz))
+            
+            # print('length(full_freq_range_MHz): %d, length(full_amp_range): %d'%(len(full_freq_range_MHz), len(full_amp_range)))
 
             idx = 0
             for (
                 freq_MHz
             ) in tune_freq_range_MHz:  # range(int(f_start), int(f_stop), int(f_step)):
+                fc_MHz = full_freq_range_MHz[idx + 1 + window_length // 2]
                 # print(f"frequency: {freq_MHz:,.0f}MHz")
+                
                 # self.cn0566_1.set_frequency_Hz(freq)  # 1.743 ms
                 self.set_frequency_Hz(freq_MHz * 1e6)
                 time.sleep(
@@ -333,7 +360,12 @@ class phaser:
 
                 data = self.SDR_1.read()  # 3.982 ms
 
-                data_sum = data[0] + data[1]
+                for _ in range(samples_per_bin):
+                    data = self.SDR_1.read()  # 3.982 ms
+                    data_sum += data[0] + data[1]
+                
+                data_sum /= samples_per_bin # average the data over 'samples_per_bin'
+                
                 #    max0 = np.max(abs(data[0]))
                 #    max1 = np.max(abs(data[1]))
                 #    print("max signals: ", max0, max1)
@@ -341,8 +373,16 @@ class phaser:
                     data_sum, self.fs_Hz, ref=2 ^ 12
                 )  # 2.375 ms
 
-                window = ampl[window_inc : window_inc + window_length + 1]
-                swath = full_amp_range[idx : idx + window_length + 1]
+                ampl = np.fft.fftshift(ampl)
+                ampl = np.flip(ampl)  # Just an experiment...
+                #freqs = np.fft.fftshift(freqs)
+                
+                window = ampl[window_inc : window_inc + window_length]
+                swath = full_amp_range[idx : idx + window_length]
+
+                # print('[%d : %d]'%(idx, idx + window_length))
+                # print('pre: %d, length: %d, size(window): %d, size(swath): %d, post: %d'%(window_inc,window_length,len(window), len(swath), len(ampl) - (window_inc+window_length)))
+                # print('freq_range: %f to %f MHz>>%f MHz'%(full_freq_range_MHz[idx],full_freq_range_MHz[min(len(full_freq_range_MHz)-1, idx+window_length)],full_freq_range_MHz[min(len(full_freq_range_MHz)-1, idx+window_length+1)]))
 
                 dwell = np.maximum(window, swath)
 
@@ -369,9 +409,9 @@ class phaser:
                     if len(freqs) > 0:
                         print(freqs)
                         print(
-                            f"[{len(freqs)}] collects average: Fc {np.average(freqs):,.3f}MHz, Amp {np.average(amps):,.3f}dBFS, SNR {np.average(snrs):,.3f}dB"
+                            f"[{len(freqs)}] collects average: Fc {np.average(freqs):,.3f}MHz, Amp {np.average(amps):,.3f}dBFS, SNR {np.average(SNR_dBFS):,.3f}dB"
                         )
-                    print(f"new centre frequency: {freq_centre_MHz:,.0f}MHz")
+                    # print(f"new centre frequency: {freq_centre_MHz:,.0f}MHz")
                     freqs = []
                     amps = []
                     snrs = []
@@ -400,11 +440,12 @@ class phaser:
             cn0566 = self.cn0566_2
             sdr = self.SDR_2
 
-        win = np.blackman(sdr.plutoSDR.rx_buffer_size)
+        win = np.blackman(sdr.rx_buffer_size)
         # First, locate fundamental.
         cn0566.cn0566.set_all_gain(127)
         cn0566.cn0566.set_beam_phase_diff(0.0)
         data = sdr.read()  # read a buffer of data
+        
         y_sum = (data[0] + data[1]) * win
         s_sum = np.fft.fftshift(np.absolute(np.fft.fft(y_sum)))
         return np.argmax(s_sum)
@@ -426,6 +467,7 @@ class phaser:
         channel_levels, _ = self.measure_channel_gains(peak_bin, cn0566, verbose=False)
         ch_mismatch = 20.0 * np.log10(channel_levels[0] / channel_levels[1])
         if verbose is True:
+            print("  channel_levels: [%f,%f] dB"%(channel_levels[0], channel_levels[1]))
             print("channel mismatch: ", ch_mismatch, " dB")
         if ch_mismatch > 0:  # Channel 0 higher, boost ch1:
             cn0566.cn0566.ccal = [0.0, ch_mismatch]
@@ -433,8 +475,273 @@ class phaser:
             cn0566.cn0566.ccal = [-ch_mismatch, 0.0]
         pass
 
+    def measure_element_gain(self, cn0566=None, cal=0, peak_bin=0, verbose=False):  # Default to central element
+        """ Calculate all the values required to do different plots. It method calls set_beam_phase_diff and
+            sets the Phases of all channel. All the math is done here.
+            parameters:
+                gcal_element: type=int
+                            If gain calibration is taking place, it indicates element number whose gain calibration is
+                            is currently taking place
+                cal_element: type=int
+                            If Phase calibration is taking place, it indicates element number whose phase calibration is
+                            is currently taking place
+                peak_bin: type=int
+                            Peak bin to examine around for amplitude
+        """
+        width = 10  # Bins around fundamental to sum
+        cn0566.set_rx_hardwaregain(6)  # Channel calibration defaults to True
+        cn0566.set_all_gain(0, apply_cal=False)  # Start with all gains set to zero
+        cn0566.set_chan_gain(cal, 127, apply_cal=False)  # Set element to max
+        time.sleep(1.0)  # todo - remove when driver fixed to compensate for ADAR1000 quirk
+        if verbose:
+            print("measuring element: ", cal)
+        total_sum = 0
+        # win = np.blackman(cn0566.sdr.rx_buffer_size)
+        win = signal.windows.flattop(cn0566.sdr.rx_buffer_size)
+        win /= np.average(np.abs(win))  # Normalize to unity gain
+        spectrum = np.zeros(cn0566.sdr.rx_buffer_size)
+
+        for count in range(0, cn0566.Averages):  # repeatsnip loop and average the results
+            data = cn0566.sdr.rx()  # todo - remove once confirmed no flushing necessary
+            data = cn0566.sdr.rx()  # read a buffer of data
+            y_sum = (data[0] + data[1]) * win
+
+            s_sum = np.fft.fftshift(np.absolute(np.fft.fft(y_sum)))
+            spectrum += s_sum
+
+            # Look for peak value within window around fundamental (reject interferers)
+            s_mag_sum = np.max(s_sum[peak_bin - width : peak_bin + width])
+            total_sum += s_mag_sum
+
+        spectrum /= cn0566.Averages * cn0566.sdr.rx_buffer_size
+        PeakValue_sum = total_sum / (cn0566.Averages * cn0566.sdr.rx_buffer_size)
+
+        return PeakValue_sum, spectrum
+
+    def gain_calibration(self, cn0566=None, verbose=False):
+        """ Perform the Gain Calibration routine."""
+
+        """Set the gain calibration flag and create an empty gcal list. Looping through all the possibility i.e. setting
+            gain of one of the channel to max and all other to 0 create a zero-list where number of 0's depend on total
+            channels. Replace only 1 element with max gain at a time. Now set gain values according to above Note."""
+
+        if (cn0566 is None) or (cn0566 == self.cn0566_1):
+            cn0566 = self.cn0566_1
+        else:
+            cn0566 = self.cn0566_2
+
+        cn0566.cn0566.gain_cal = True  # Gain Calibration Flag
+        gcalibrated_values = []  # Intermediate cal values list
+        plot_data = []
+        peak_bin = self.find_peak_bin()
+        if verbose is True:
+            print("Peak bin at ", peak_bin, " out of ", cn0566.sdr.rx_buffer_size)
+        # gcal_element indicates current element/channel which is being calibrated
+        for gcal_element in range(0, (cn0566.cn0566.num_elements)):
+            if verbose is True:
+                print("Calibrating Element " + str(gcal_element))
+
+            gcal_val, spectrum = self.measure_element_gain(
+                cn0566, gcal_element, peak_bin, verbose=True
+            )
+            if verbose is True:
+                print("Measured signal level (ADC counts): " + str(gcal_val))
+            gcalibrated_values.append(gcal_val)  # make a list of intermediate cal values
+            plot_data.append(spectrum)
+
+        """ Minimum gain of intermediated cal val is set to Maximum value as we cannot go beyond max value and gain
+            of all other channels are set accordingly"""
+        print("gcalibrated values: ", gcalibrated_values)
+        for k in range(0, 8):
+            #            x = ((gcalibrated_values[k] * 127) / (min(gcalibrated_values)))
+            cn0566.cn0566.gcal[k] = min(gcalibrated_values) / (gcalibrated_values[k])
+
+        cn0566.cn0566.gain_cal = (
+            False  # Reset the Gain calibration Flag once system gain is calibrated
+        )
+
+        return plot_data
+        # print(cn0566.gcal)
+
+    def phase_calibration(self, cn0566=None, verbose=False):
+        """ Perform the Phase Calibration routine."""
+
+        """ Set the phase calibration flag and create an empty pcal list. Looping through all the possibility
+            i.e. setting gain of two adjacent channels to gain calibrated values and all other to 0 create a zero-list
+            where number of 0's depend on total channels. Replace gain value of 2 adjacent channel.
+            Now set gain values according to above Note."""
+        peak_bin = self.find_peak_bin()
+        if verbose is True:
+            print("Peak bin at ", peak_bin, " out of ", cn0566.sdr.rx_buffer_size)
+
+        #        cn0566.phase_cal = True  # Gain Calibration Flag
+        #        cn0566.load_gain_cal('gain_cal_val.pkl')  # Load gain cal val as phase cal is dependent on gain cal
+        cn0566.pcal = [0, 0, 0, 0, 0, 0, 0, 0]
+        cn0566.ph_deltas = [0, 0, 0, 0, 0, 0, 0]
+        plot_data = []
+        # cal_element indicates current element/channel which is being calibrated
+        # As there are 8 channels and we take two adjacent chans for calibration we have 7 cal_elements
+        for cal_element in range(0, 7):
+            if verbose is True:
+                print("Calibrating Element " + str(cal_element))
+
+            PhaseValues, gain, = self.phase_cal_sweep(
+                cn0566, peak_bin, cal_element, cal_element + 1
+            )
+
+            ph_delta = to_sup((180 - PhaseValues[gain.index(min(gain))]) % 360.0)
+            if verbose is True:
+                print("Null found at ", PhaseValues[gain.index(min(gain))])
+                print("Phase Delta to correct: ", ph_delta)
+            cn0566.ph_deltas[cal_element] = ph_delta
+
+            cn0566.pcal[cal_element + 1] = to_sup(
+                (cn0566.pcal[cal_element] - ph_delta) % 360.0
+            )
+            plot_data.append(gain)
+        return PhaseValues, plot_data
+
+    def phase_cal_sweep(self, cn0566 = None, peak_bin=0, ref=0, cal=1):
+        """ Calculate all the values required to do different plots. It method
+            calls set_beam_phase_diff and sets the Phases of all channel.
+            parameters:
+                gcal_element: type=int
+                            If gain calibration is taking place, it indicates element number whose gain calibration is
+                            is currently taking place
+                cal_element: type=int
+                            If Phase calibration is taking place, it indicates element number whose phase calibration is
+                            is currently taking place
+                peak_bin: type=int
+                            Which bin the fundamental is in.
+                            This prevents detecting other spurs when deep in a null.
+        """
+
+        cn0566.set_all_gain(0)  # Reset all elements to zero
+        cn0566.set_chan_gain(ref, 127, apply_cal=True)  # Set two adjacent elements to zero
+        cn0566.set_chan_gain(cal, 127, apply_cal=True)
+        sleep(1.0)
+
+        cn0566.set_chan_phase(ref, 0.0, apply_cal=False)  # Reference element
+        # win = np.blackman(cn0566.sdr.rx_buffer_size)
+        win = signal.windows.flattop(cn0566.sdr.rx_buffer_size)  # Super important!
+        win /= np.average(np.abs(win))  # Normalize to unity gain
+        width = 10  # Bins around fundamental to sum
+        sweep_angle = 180
+        # These are all the phase deltas (i.e. phase difference between Rx1 and Rx2, then Rx2 and Rx3, etc.) we'll sweep
+        PhaseValues = np.arange(-(sweep_angle), (sweep_angle), cn0566.phase_step_size)
+
+        gain = []  # Create empty lists
+        for phase in PhaseValues:  # These sweeps phase value from -180 to 180
+            # set Phase of channels based on Calibration Flag status and calibration element
+            cn0566.set_chan_phase(cal, phase, apply_cal=False)
+            total_sum = 0
+            for count in range(0, cn0566.Averages):  # repeat loop and average the results
+                data = cn0566.sdr.rx()  # read a buffer of data
+                data = cn0566.sdr.rx()
+                y_sum = (data[0] + data[1]) * win
+                s_sum = np.fft.fftshift(np.absolute(np.fft.fft(y_sum)))
+
+                # Pick (uncomment) one:
+                # 1) RSS sum a few bins around max
+                # s_mag_sum = np.sqrt(
+                #     np.sum(np.square(s_sum[peak_bin - width : peak_bin + width]))
+                # )
+
+                # 2) Take maximum value
+                # s_mag_sum = np.maximum(s_mag_sum, 10 ** (-15))
+
+                # 3) Apparently the correct way, use flat-top window, look for peak
+                s_mag_sum = np.max(s_sum[peak_bin - width : peak_bin + width])
+                s_mag_sum = np.max(s_sum)
+                total_sum += s_mag_sum
+            PeakValue_sum = total_sum / (cn0566.Averages * cn0566.sdr.rx_buffer_size)
+            gain.append(PeakValue_sum)
+
+        return (
+            PhaseValues,
+            gain,
+        )  # beam_phase, max_gain
+
+    # plutoSDR range: 0 to 74.5 dB
+    # bladeRF range: -15 to 60 dB
+    def set_sdr_gain(self, cn0566=None, gain:float = 6.0, apply_calibration:bool = False):
+        if (cn0566 is None) or (cn0566 == self.cn0566_1):
+            cn0566 = self.cn0566_1
+            sdr = self.SDR_1
+        else:
+            cn0566 = self.cn0566_2
+            sdr = self.SDR_2
+
+        sdr.set_rx_hardwaregain(gain, apply_calibration)
+
+    def antenna_element_test(self, cn0566=None, fc_Hz=None, verbose: bool = False):
+        if (cn0566 is None) or (cn0566 == self.cn0566_1):
+            cn0566 = self.cn0566_1
+            sdr = self.SDR_1
+        else:
+            cn0566 = self.cn0566_2
+            sdr = self.SDR_2
+
+        if (fc_Hz is not None) and (fc_Hz != self.fc_Hz):
+            self.set_frequency_Hz(fc_Hz)
+
+        peak_bin = self.find_peak_bin()
+        
+        # initial channel calibration
+        channel_levels, _ = self.measure_channel_gains(peak_bin, cn0566, verbose=False)
+        channel_mismatch = 20.0 * np.log10(channel_levels[0] / channel_levels[1])
+        print("  channel_levels: [%f,%f] dB"%(channel_levels[0], channel_levels[1]))
+        print("channel mismatch: ", channel_mismatch, " dB")
+        if channel_mismatch > 0:  # Channel 0 higher, boost ch1:
+            cn0566.cn0566.ccal = [0.0, channel_mismatch]
+        else:  # Channel 1 higher, boost ch0:
+            cn0566.cn0566.ccal = [-channel_mismatch, 0.0]
+        
+        if abs(channel_mismatch) > 3.0:
+            print("[ERROR] channel mismatch is greater than 3dB, please check your connections")
+        
+
+        # check each element
+        sdr.rx_gain = 63
+        cn0566.cn0566.set_all_gain(0, apply_cal=False)  # Start with all gains set to zero
+        element_levels = np.zeros(8)
+        # enable each element 1 by 1
+        for element in range(4):
+            # Note: channel 1 is at 0->3, channel 2 is 4->7
+            # Channel 1 - set element to max
+            cn0566.cn0566.set_chan_gain(
+                element,
+                127,
+                apply_cal=False,
+            )  
+            # Channel 2 - set element to max
+            cn0566.cn0566.set_chan_gain(
+                4 + element,
+                127,
+                apply_cal=False,
+            )
+            time.sleep(0.001)
+            ch_lvl, _ = self.measure_channel_gains(peak_bin, cn0566, set_rx_gains=False, verbose=False)
+            element_levels[element] = 20.0 * np.log10(ch_lvl[0])
+            element_levels[4+element] = 20.0 * np.log10(ch_lvl[1])
+            # Channel 1 - set element back to zero
+            cn0566.cn0566.set_chan_gain(
+                element,
+                0,
+                apply_cal=False,
+            )  
+            # Channel 2 - set element back to zero
+            cn0566.cn0566.set_chan_gain(
+                4 + element,
+                0,
+                apply_cal=False,
+            )
+            time.sleep(0.001)
+        print("[INFO] Per element signal level (dBFS):\n%s"%(format_vector(element_levels)))
+
+
     def measure_channel_gains(
-        self, peak_bin, cn0566=None, verbose=False
+        self, peak_bin, cn0566=None, set_rx_gains=True, verbose=False
     ):  # Default to central element
         """Calculate all the values required to do different plots. It method calls set_beam_phase_diff and
         sets the Phases of all channel. All the math is done here.
@@ -456,65 +763,52 @@ class phaser:
             sdr = self.SDR_2
 
         width = 10  # Bins around fundamental to sum
-        win = signal.windows.flattop(sdr.plutoSDR.rx_buffer_size)
+        win = signal.windows.flattop(sdr.rx_buffer_size)
         win /= np.average(np.abs(win))  # Normalize to unity gain
         plot_data = []
         channel_level = []
         # cn0566.cn0566.set_rx_hardwaregain(6, False)
-        sdr.set_rx_gain(63)
-        for channel in range(0, 2):
-            # Start with sdr CH0 elements
+        
+        if set_rx_gains:
+            sdr.rx_gain = 63
             cn0566.cn0566.set_all_gain(
-                0, apply_cal=False
-            )  # Start with all gains set to zero
-            cn0566.cn0566.set_chan_gain(
-                (1 - channel) * 4 + 0,
-                127,
-                apply_cal=False,  # 1-channel because wonky channel mapping!!
-            )  # Set element to max
-            cn0566.cn0566.set_chan_gain(
-                (1 - channel) * 4 + 1, 127, apply_cal=False
-            )  # Set element to max
-            cn0566.cn0566.set_chan_gain(
-                (1 - channel) * 4 + 2, 127, apply_cal=False
-            )  # Set element to max
-            cn0566.cn0566.set_chan_gain(
-                (1 - channel) * 4 + 3, 127, apply_cal=False
-            )  # Set element to max
-
-            # todo - remove when driver fixed to compensate for ADAR1000 quirk
-            time.sleep(1.0)
-
-            if verbose:
-                print("measuring channel ", channel)
-
-            total_sum = 0
-            # win = np.blackman(sdr.plutoSDR.rx_buffer_size)
-
-            spectrum = np.zeros(sdr.plutoSDR.rx_buffer_size)
-
-            for count in range(
-                0, cn0566.cn0566.Averages
-            ):  # repeatsnip loop and average the results
-                data = sdr.read()  # todo - remove once confirmed no flushing necessary
-                data = sdr.read()  # read a buffer of data
-                y_sum = (data[0] + data[1]) * win
-
-                s_sum = np.fft.fftshift(np.absolute(np.fft.fft(y_sum)))
-                spectrum += s_sum
-
-                # Look for peak value within window around fundamental (reject interferers)
-                s_mag_sum = np.max(s_sum[peak_bin - width : peak_bin + width])
-                total_sum += s_mag_sum
-
-            spectrum /= cn0566.cn0566.Averages * sdr.plutoSDR.rx_buffer_size
-            PeakValue_sum = total_sum / (
-                cn0566.cn0566.Averages * sdr.plutoSDR.rx_buffer_size
+                127, apply_cal=False
             )
-            plot_data.append(spectrum)
-            channel_level.append(PeakValue_sum)
+        
+        spectrum_averaged_perchannel = [np.zeros(sdr.rx_buffer_size), np.zeros(sdr.rx_buffer_size)]
+        peakvalue_averaged_perchannel = [0, 0]
+        
+        # data = sdr.read()  # todo - remove once confirmed no flushing necessary
+        data = sdr.read()  # read a buffer of data
 
-        return channel_level, plot_data
+        spectrum_averaged_perchannel[0] = np.fft.fftshift(np.absolute(np.fft.fft(data[0] * win)))
+        spectrum_averaged_perchannel[1] = np.fft.fftshift(np.absolute(np.fft.fft(data[1] * win)))
+
+        # Look for peak value within window around fundamental (reject interferers)
+        peakvalue_averaged_perchannel[0] = np.max(spectrum_averaged_perchannel[0][peak_bin - width : peak_bin + width])
+        peakvalue_averaged_perchannel[1] = np.max(spectrum_averaged_perchannel[1][peak_bin - width : peak_bin + width])
+        time.sleep(0.001)
+            
+        for count in range(
+            0, cn0566.cn0566.Averages -1
+        ):  # repeats loop and average the results
+            
+            data = sdr.read()  # read a buffer of data
+
+            spectrum_averaged_perchannel[0] += np.fft.fftshift(np.absolute(np.fft.fft(data[0] * win)))
+            spectrum_averaged_perchannel[1] += np.fft.fftshift(np.absolute(np.fft.fft(data[1] * win)))
+
+            # Look for peak value within window around fundamental (reject interferers)
+            peakvalue_averaged_perchannel[0] += np.max(spectrum_averaged_perchannel[0][peak_bin - width : peak_bin + width])
+            peakvalue_averaged_perchannel[1] += np.max(spectrum_averaged_perchannel[1][peak_bin - width : peak_bin + width])
+            time.sleep(0.001)
+
+        spectrum_averaged_perchannel[0] /= (cn0566.cn0566.Averages * sdr.rx_buffer_size)
+        spectrum_averaged_perchannel[1] /= (cn0566.cn0566.Averages * sdr.rx_buffer_size)
+        peakvalue_averaged_perchannel[0] /= (cn0566.cn0566.Averages * sdr.rx_buffer_size)
+        peakvalue_averaged_perchannel[1] /= (cn0566.cn0566.Averages * sdr.rx_buffer_size)
+ 
+        return peakvalue_averaged_perchannel, spectrum_averaged_perchannel
 
 
 def test_buffer_size(my_phaser):
@@ -575,29 +869,51 @@ if __name__ == "__main__":
 
     my_phaser = phaser()
     my_phaser.setup()
+    my_phaser.set_rx_buffer_size(2048)
+    
+    peak_freq = my_phaser.find_peak(10.4e9, 10.6e9)
+    my_phaser.set_frequency_Hz(peak_freq)
+    my_phaser.antenna_element_test()
+    
 
-    # test the tuning range
-    # for freq_MHz in range(10_600, 8_000, -100):
-    #     print(f"set fc_MHz -> {freq_MHz:,.0f}")
-    #     my_phaser.set_frequency_Hz(freq_MHz * 1e6)
+#    # channel calibration
+#    if True:
+#        while True:
+#            peak_freq = my_phaser.find_peak(9.3e9, 10.6e9)
+#            if peak_freq is not None:
+#                my_phaser.set_frequency_Hz(peak_freq)
+#                my_phaser.channel_calibration(verbose=True)
+#                my_phaser.set_sdr_gain() # set to 6dB
+#                my_phaser.antenna_element_test()
+#                break
 
-    # channel calibration
-    my_phaser.set_frequency_Hz(9_400e6)
-    # my_phaser.channel_calibration(verbose=True)
+#            time.sleep(5)
+#        
+#        peak_freq_MHz = int(peak_freq/1e6)
+#    else:
+#        peak_freq_MHz = 10_430
+
+    # my_phaser.plot(peak_freq_MHz*1e6)
+
     # 0.5192586079313221 dB @ 9.4GHz, rx_gain=6dB
     # my_phaser.cn0566_1.cn0566.ccal = [0.0, 0.5192586079313221]
     # my_phaser.SDR_1.channel_cal = [1.2807293215820739, 0.0]
-    my_phaser.SDR_1.channel_cal = [2.0, 0.0]
+    #my_phaser.SDR_1.channel_cal = [2.0, 0.0]
 
-    my_phaser.SDR_1.rx_gain=63  # 60 = 1500/2000
+    # my_phaser.SDR_1.rx_gain=63  # 60 = 1500/2000
 
-    test_buffer_size(my_phaser)
+    # my_phaser.set_frequency_Hz(peak_freq_MHz*1e6)
+    # my_phaser.channel_calibration(verbose=True)
 
-    # my_phaser.plot(9_400e6)
+    # test_buffer_size(my_phaser)
 
-    # my_phaser.freq_tracker(9_400)
+    # my_phaser.plot(peak_freq_MHz*1e6)
+
+    # my_phaser.freq_tracker(peak_freq_MHz)
+    #my_phaser.freq_tracker(10_400, BW_MHz=100)
 
     # my_phaser.sweep(9.7e9, 10.6e9, interactive=True)
+    # my_phaser.find_peak(9.3e9, 10.6e9)
 
     # from line_profiler import LineProfiler
 

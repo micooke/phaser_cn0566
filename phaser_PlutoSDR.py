@@ -25,7 +25,15 @@ class phaser_PlutoSDR:
         self.__name__ = "PlutoSDR"
         self.ccal = [0.0, 0.0]
         self.default_gain_dB = 0
-        
+        self.rx_gain_limit = [0.0, 74.5]
+        self.tx_gain_limit = [-90.0, 0]
+                
+        self.monitor_ch_names = [
+            "Temp (deg C): ",
+            "CH1 RSSI(dB): ",
+            "CH2 RSSI(dB): ",
+        ]
+
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
 
         self._channel = None
@@ -57,20 +65,24 @@ class phaser_PlutoSDR:
         channel_number: int = [0,1],
         rx_gain_dB: int = 10,
         rx_buffer_size: int = 1_024,
-        DeviceString: str = "192.168.2.1",
+        DeviceString: str = "ip:192.168.2.1",
     ):
-        if ":" not in DeviceString:
-            self.DeviceString = f"ip:{DeviceString}"
-
+        self.DeviceString = DeviceString
+        if DeviceString != "ip:phaser.local:50901":
+            alt_DeviceString = "ip:phaser.local:50901"
+        else:
+            alt_DeviceString = "ip:192.168.2.1"
+       
+        # First try to connect to a locally connected device. On success, connect,
+        # on failure, connect to remote device
         try:
-            print(f"Connecting to '{self.DeviceString}' via {self.__name__}..", end=" ")
+            print(f"Connecting to '{self.__name__}' via '{self.DeviceString}'...", end=" ")
             self.sdr = ad9361(uri=self.DeviceString)
             print("Connected")
         except Exception:  # pyadi-iio raises this error
-        # except RuntimeError: # SoapySDR raises this error
             try:
-                self.DeviceString = "ip:phaser.local:50901"
-                print(f"Failed. Try connecting to '{self.DeviceString}'..", end=" ")
+                self.DeviceString = alt_DeviceString
+                print(f"Failed. Connecting via '{self.DeviceString}'...", end=" ")
                 self.sdr = ad9361(uri=self.DeviceString)
                 print("Connected")
             except Exception:
@@ -106,19 +118,11 @@ class phaser_PlutoSDR:
         self.sdr.filter = os.path.join(self.base_dir, "LTE20_MHz.ftr")
 
         # Make sure the Tx channels are attenuated (or off) and their freq is far away from Rx
-        # this is a negative number between 0 and -88 (-90 according to another source)
+        # this is a negative number between 0 and -88 (-90 according to pysdr.org)
         self.sdr.tx_hardwaregain_chan0 = int(-88)
         self.sdr.tx_hardwaregain_chan1 = int(-88)
 
         return True
-
-    @property
-    def channel(self):
-        return self._channel
-
-    @channel.setter
-    def channel(self, value: int = 0):
-        self._channel = value
 
     @property
     def channel_cal(self):
@@ -132,23 +136,26 @@ class phaser_PlutoSDR:
     def rx_gain(self):
         return [self.sdr.rx_hardwaregain_chan0, self.sdr.rx_hardwaregain_chan1]
 
-    # hackRF range: 0 to 116.0 dB
+    # plutoSDR range: 0 to 74.5 dB
     @rx_gain.setter
-    def rx_gain(self, gain_dB: int = 0):
-        if type(gain_dB) is str:
-            if gain_dB in ['manual', 'slow_attack', 'fast_attack']:
-                self.sdr.gain_control_mode_chan0 = gain_dB
-                self.sdr.gain_control_mode_chan1 = gain_dB
-            else:
-                print(f"[ERROR] unknown gain control mode {gain_dB}")
+    def rx_gain(self, gain_dB: float = 0, gain_mode:str = 'manual', apply_cal:bool = True):
+        gain_dB = np.clip(gain_dB, self.rx_gain_limit[0], self.rx_gain_limit[1]) # bound the gain
+
+        if gain_mode in ['manual', 'slow_attack', 'fast_attack']:
+            if self.sdr.gain_control_mode_chan0 != gain_mode:
+                self.sdr.gain_control_mode_chan0 = gain_mode
+                self.sdr.gain_control_mode_chan1 = gain_mode
         else:
-            if self.sdr.gain_control_mode_chan0 != 'manual':
-                self.sdr.gain_control_mode_chan0 = 'manual'
-                self.sdr.gain_control_mode_chan1 = 'manual'
+            print(f"[ERROR] unknown gain control mode {gain_mode}")
+            return
 
-            self.sdr.rx_hardwaregain_chan0 = gain_dB + self.ccal[0]
-            self.sdr.rx_hardwaregain_chan1 = gain_dB + self.ccal[1]
-
+        if gain_mode == 'manual':
+            if apply_cal:
+                self.sdr.rx_hardwaregain_chan0 = gain_dB + self.ccal[0]
+                self.sdr.rx_hardwaregain_chan1 = gain_dB + self.ccal[1]
+            else:
+                self.sdr.rx_hardwaregain_chan0 = gain_dB
+                self.sdr.rx_hardwaregain_chan1 = gain_dB
     @property
     def rx_bandwidth_Hz(self):
         return self.sdr.rx_rf_bandwidth
@@ -212,7 +219,7 @@ class phaser_PlutoSDR:
 
     @staticmethod
     def test(num_reads: int = 1, rx_buffer_size: int = 1_024_000, #2_097_144
-             DeviceString: str = "hackrf"
+             DeviceString: str = "192.168.2.1"
              ):
         print("[INFO] test")
         sdr = phaser_PlutoSDR(DeviceString = DeviceString)
@@ -222,18 +229,18 @@ class phaser_PlutoSDR:
         
         sdr.rx_buffer_size = rx_buffer_size
         data = [0]*rx_buffer_size
-        sample_count = 0
+        num_samples = 0
         t0 = time.perf_counter_ns()
         for n in range(num_reads):
             data = sdr.read()
-            sample_count += len(data)
+            num_samples += len(data)
         t1 = time.perf_counter_ns()
         sdr.close()
         print(data)
 
         time_delta_us = (t1-t0)/1_000
-        read_rate_Msps = sample_count / time_delta_us
-        print(f"read: sample_count = {sample_count:,}, time: {time_delta_us:,.3f}us, rate: {read_rate_Msps:,.3f}Msps")
+        read_rate_Msps = num_samples / time_delta_us
+        print(f"read: num_samples = {num_samples:,}, time: {time_delta_us:,.3f}us, rate: {read_rate_Msps:,.3f}Msps")
     
     @staticmethod
     def record(
@@ -241,7 +248,7 @@ class phaser_PlutoSDR:
         fc_Hz: float = Phaser_LO_HIGH,
         fs_Hz: int = 10_000_000,
         rx_buffer_size: int = 1_024_000, #2_097_144,
-        DeviceString: str = "hackrf"
+        DeviceString: str = "192.168.2.1"
     ):
         print("[INFO] record")
         sdr = phaser_PlutoSDR(fs_Hz = fs_Hz, fc_Hz = fc_Hz, DeviceString = DeviceString)
@@ -299,7 +306,7 @@ class phaser_PlutoSDR:
         print(f"record: num_samples = {num_samples:,}, time: {time_delta_us:,.3f}us, rate: {read_and_record_rate_Msps:,.3f}Msps")
        
     @staticmethod
-    def plot(fc_Hz: float = Phaser_LO_HIGH, DeviceString: str = "hackrf"):
+    def plot(fc_Hz: float = Phaser_LO_HIGH, DeviceString: str = "192.168.2.1"):
         print("[INFO] plot")
         import matplotlib.pyplot as plt
         sdr = phaser_PlutoSDR(fc_Hz=fc_Hz, DeviceString = DeviceString)
@@ -337,12 +344,29 @@ class phaser_PlutoSDR:
         plt.tight_layout()
         plt.show()
 
+    def status(self, verbose:bool = False):
+        # note: get attributes list from:
+        # https://wiki.analog.com/resources/tools-software/linux-drivers/iio-transceiver/ad9361
+        # e.g. in_temp0_input = sdr._get_iio_attr('temp0','input',False)
+        if verbose:
+            print("Reading status...")
+        monitor_vals = []
+        monitor_vals.append(float(self.sdr._get_iio_attr('temp0','input',False)) / 1000) # as an integer: 12345 = 12.345 deg C
+        monitor_vals.append(self.sdr._get_iio_attr('voltage0','rssi',False)) # channel 1 received signal strength indicator (in dB)
+        monitor_vals.append(self.sdr._get_iio_attr('voltage1','rssi',False)) # channel 2 received signal strength indicator (in dB)
+
+        if verbose:
+            print(monitor_vals)
+        
+        return monitor_vals
+
 if __name__ == '__main__':
     phaser_PlutoSDR.list()
-    num_reads=5
-    DeviceString="192.168.2.12"#'hackrf'#'bladerf'
+    num_reads: int=5
+    DeviceString: str = "192.168.2.1" # "192.168.2.2"
     phaser_PlutoSDR.plot(1.6e9, DeviceString=DeviceString)
-    phaser_PlutoSDR.test(num_reads=num_reads, DeviceString=DeviceString)
-    phaser_PlutoSDR.record(num_reads=num_reads, DeviceString=DeviceString)
+    # phaser_PlutoSDR.test(num_reads=num_reads, DeviceString=DeviceString)
+    # phaser_PlutoSDR.record(num_reads=num_reads, DeviceString=DeviceString)
+    phaser_PlutoSDR.status()
 
     # default 192.168.1.50

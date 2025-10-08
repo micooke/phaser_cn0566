@@ -10,6 +10,15 @@ nominal_hb100_freq_Hz: float = 10.525e9
 Phaser_LO_LOW: float = 2.5e9
 Phaser_LO_HIGH: float = 1.6e9  # 1.6e9
 
+def to_sup(angle):
+    """ Return suplimentary angle if greater than 180 degrees. """
+    if angle > 180.0:
+        angle -= 360.0
+    return angle
+
+def format_vector(v, str_format:str = "{:,.2f}"):
+    return "[%s]"%(", ".join(str_format.format(v_) for v_ in v))
+
 def print_vector(input, num_values:int = 5):
     print("["+f"{input[:num_values]}"+"..."+f"{input[-num_values:]}"+"]")
 
