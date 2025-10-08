@@ -26,7 +26,7 @@ faulthandler.enable()
 import numpy as np
 
 from phaser_CN0566 import phaser_CN0566
-#from phaser_PlutoSDR import phaser_PlutoSDR
+from phaser_PlutoSDR import phaser_PlutoSDR
 from phaser_BladeRF import phaser_BladeRF
 from phaser_IO import phaser_SigMF, phaser_IO
 from phaser_utils import *
@@ -63,14 +63,16 @@ class phaser:
         self.rx_lo_Hz = rx_lo_Hz
         self.two_receivers = two_receivers
 
-        # self.SDR_1 = phaser_PlutoSDR(self.fs_Hz, self.rx_lo_Hz, PlutoSDR_ip="192.168.2.11")
         self.SDR_1 = phaser_BladeRF(self.fs_Hz, self.rx_lo_Hz, DeviceString="6b5d") # Note: change
+        if self.SDR_1.sdr is None:
+            self.SDR_1 = phaser_PlutoSDR(self.fs_Hz, self.rx_lo_Hz, DeviceString="192.168.2.11")
         self.cn0566_1 = phaser_CN0566(
             self.fc_Hz, self.rx_lo_Hz, DeviceString="ip:phaser.local"
         )
         if self.two_receivers:
-            # self.SDR_2 = phaser_PlutoSDR(self.fs_Hz, self.rx_lo_Hz, PlutoSDR_ip="192.168.2.12")
             self.SDR_2 = phaser_BladeRF(self.fs_Hz, self.rx_lo_Hz, DeviceString="6b5d") # Note: change
+            if self.SDR_2.sdr is None:
+                self.SDR_2 = phaser_PlutoSDR(self.fs_Hz, self.rx_lo_Hz, DeviceString="192.168.2.12")
             self.cn0566_2 = phaser_CN0566(
                 self.fc_Hz, self.rx_lo_Hz, DeviceString="ip:phaser.local"
             )

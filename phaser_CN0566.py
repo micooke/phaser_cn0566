@@ -91,7 +91,7 @@ class phaser_CN0566:
         self.rx_lo_Hz = int(rx_lo_Hz)  # Receive Freq
 
         # Set initial PLL frequency to HB100 nominal
-        self.set_frequency_Hz(self.fc_Hz)
+        self.set_frequency_Hz(nominal_hb100_freq_Hz)
 
         gain_list = [64] * 8  # (64 is about half scale)
         for i in range(0, len(gain_list)):
@@ -113,6 +113,8 @@ class phaser_CN0566:
         limit_freq: bool = False,
         verbose: bool = False,
     ):
+        if fc_Hz is None:
+            return None
         new_lo = None
         freq_changed: bool = True
 

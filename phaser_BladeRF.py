@@ -74,9 +74,11 @@ class phaser_BladeRF:
         atexit.register(self.close)
 
     def close(self):
-        for ch in self._channel:
-            ch.enable = False
-        self.sdr.close()    
+        if self._channel is not None:
+            for ch in self._channel:
+                ch.enable = False
+        if self.sdr is not None:
+            self.sdr.close()
 
     # @author: Mark Cooke
     def setup(
@@ -107,6 +109,7 @@ class phaser_BladeRF:
         except _bladerf.BladeRFError:
             print("No bladeRF devices found.")
             self.close()
+            return None
 
         time.sleep(0.5)
 

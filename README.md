@@ -22,9 +22,8 @@ cmake ..
 make -j8
 sudo make install
 sudo ldconfig
-pushd libraries/libbladeRF_bindings/python
+cd ../libraries/libbladeRF_bindings/python
 sudo python3 setup.py install # install the python bindings
-popd
 popd
 
 # Virtual Environments

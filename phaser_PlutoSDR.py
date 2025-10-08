@@ -210,7 +210,9 @@ class phaser_PlutoSDR:
         self.sdr.rx_lo = int(self.rx_lo_Hz)
         # print(f"PlutoSDR [LO] (MHz) = [{int(self.rx_lo_Hz)/1e6:,.0f}]")
 
-    def read(self):
+    def read(self, rx_buffer_size = None):
+        if rx_buffer_size is not None:
+            self.rx_buffer_size = rx_buffer_size
         return self.sdr.rx()
     
     @staticmethod
